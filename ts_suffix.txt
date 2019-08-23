@@ -1,0 +1,5 @@
+
+// Register the types we've defined.
+for (const type of types) {
+    RevertError.registerType(type);
+}
