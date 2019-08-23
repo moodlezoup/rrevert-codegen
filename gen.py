@@ -2,10 +2,12 @@ import argparse
 import os
 import re
 import shutil
-import sys
 
 from solidity_parser import parser
 from zero_ex.dev_utils import abi_utils
+
+
+ORDER_UTILS_DIR = "packages/order-utils/src"
 
 
 # https://stackoverflow.com/a/41510011
@@ -154,23 +156,25 @@ def ts_codegen(functions, repo, target):
     os.system(f"cd {repo} && yarn prettier && cd {cwd}")
 
 
+def get_ts_target(repo, lib_path):
+    m = re.match(r"Lib(\w+)RichErrors.sol", lib_path.split("/")[-1])
+    identifier = m.group(1).lower()
+    return f"{repo}/{ORDER_UTILS_DIR}/{identifier}_revert_errors.ts"
+
+
 arg_parser = argparse.ArgumentParser(
     description="Generates Solidity rich reverts library and corresponding Typescript classes from boilerplate."
 )
 arg_parser.add_argument("--repo", help="Absolute path to monorepo.")
 arg_parser.add_argument(
-    "--sol",
+    "--lib_path",
     help="Path (relative to monorepo) to Solidity file containing library boilerplate.",
-)
-arg_parser.add_argument(
-    "--ts",
-    help="Path (relative to monorepo) to Typescript file to place error classes.",
 )
 
 args = arg_parser.parse_args()
 
-sol_target = f"{args.repo}/{args.sol}"
-ts_target = f"{args.repo}/{args.ts}"
+sol_target = f"{args.repo}/{args.lib_path}"
+ts_target = get_ts_target(args.repo, args.lib_path)
 
 sourceUnit = parser.parse_file(sol_target)
 sourceUnitObject = parser.objectify(sourceUnit)
