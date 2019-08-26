@@ -31,11 +31,16 @@ def constant_casing(function_name):
 
 
 def sol_error_selector(function_name, param_names, param_types):
-    selector_name = f"{constant_casing(function_name)}_SELECTOR"
+    if len(param_names) == 0:
+        selector_name = f"{constant_casing(function_name)}"
+        selector_string = f'bytes internal constant {selector_name} =\n    hex"{abi_utils.method_id(function_name, param_types)[2:]}";'
+    else:
+        selector_name = f"{constant_casing(function_name)}_SELECTOR"
+        selector_string = f"bytes4 internal constant {selector_name} =\n    {abi_utils.method_id(function_name, param_types)};"
+
     selector_comment = (
         f'// bytes4(keccak256("{function_name}({",".join(param_types)})"))'
     )
-    selector_string = f"bytes4 internal constant {selector_name} =\n    {abi_utils.method_id(function_name, param_types)};"
 
     return (selector_name, selector_comment, selector_string)
 
@@ -59,7 +64,7 @@ def sol_error(function_name, param_names, param_types, selector_name):
     modifiers = indent("internal\npure\nreturns (bytes memory)")
 
     if len(param_names) == 0:
-        return_value = f"return abi.encodeWithSelector({selector_name});"
+        return_value = f"return {selector_name};"
     else:
         encode_params = indent(",\n".join([selector_name] + param_names))
         return_value = f"return abi.encodeWithSelector(\n{encode_params}\n);"
