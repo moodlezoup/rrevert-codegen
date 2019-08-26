@@ -35,7 +35,7 @@ def sol_error_selector(function_name, param_names, param_types):
     selector_comment = (
         f'// bytes4(keccak256("{function_name}({",".join(param_types)})"))'
     )
-    selector_string = f"bytes4 internal constant {selector_name} = \n    {abi_utils.method_id(function_name, param_types)};"
+    selector_string = f"bytes4 internal constant {selector_name} =\n    {abi_utils.method_id(function_name, param_types)};"
 
     return (selector_name, selector_comment, selector_string)
 
@@ -124,8 +124,10 @@ def sol_codegen(lib_name, functions, target):
     with open(target, "a") as f:
         f.write(f"\n\nlibrary {lib_name} ")
         f.write("{\n")
-        f.write(indent("\n\n".join(error_selectors + ["// solhint-disable func-name-mixedcase"] + error_functions)))
-        f.write("\n}")
+        f.write("\n\n".join([indent(s) for s in error_selectors]))
+        f.write(f'\n\n{indent("// solhint-disable func-name-mixedcase")}\n')
+        f.write("\n\n".join([indent(f) for f in error_functions]))
+        f.write("\n}\n")
 
 
 def ts_codegen(functions, repo, target):
