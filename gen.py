@@ -124,7 +124,7 @@ def sol_codegen(lib_name, functions, target):
     with open(target, "a") as f:
         f.write(f"\n\nlibrary {lib_name} ")
         f.write("{\n")
-        f.write(indent("\n\n".join(error_selectors + error_functions)))
+        f.write(indent("\n\n".join(error_selectors + ["// solhint-disable func-name-mixedcase"] + error_functions)))
         f.write("\n}")
 
 
