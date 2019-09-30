@@ -26,11 +26,54 @@ def camel_case_split(identifier):
     return RE_WORDS.findall(identifier)
 
 
+def upper_camel_casing(enum_value):
+    return "".join([c.lower().capitalize() for c in enum_value.split("_")])
+
+
 def constant_casing(function_name):
     return "_".join([c.upper() for c in camel_case_split(function_name)])
 
 
-def sol_error_selector(function_name, param_names, param_types):
+def indent(text):
+    lines = text.split("\n")
+    return "\n".join([f"    {line}" for line in lines])
+
+
+def params(function_obj, convertEnums=False, bytesMemory=False):
+    param_names = []
+    param_types = []
+
+    for param, props in function_obj.arguments.items():
+        param_names.append(param)
+        if "name" in props.typeName:
+            type = props.typeName.name
+            param_types.append(
+                type + " memory" if bytesMemory and type == "bytes" else type
+            )
+        else:
+            param_types.append("uint8" if convertEnums else props.typeName.namePath)
+
+    return param_names, param_types
+
+
+def ts_type(sol_type, enums):
+    if sol_type in enums:
+        return sol_type
+    elif "int" in sol_type:
+        return "BigNumber | number | string"
+    else:
+        return "string"
+
+
+def get_ts_target(repo, lib_path):
+    m = re.match(r"Lib(\w+)RichErrors.sol", lib_path.split("/")[-1])
+    identifier = m.group(1).lower()
+    return f"{repo}/{ORDER_UTILS_DIR}/{identifier}_revert_errors.ts"
+
+
+def sol_error_selector(function_name, function_obj):
+    param_names, param_types = params(function_obj, convertEnums=True)
+
     if len(param_names) == 0:
         selector_name = f"{constant_casing(function_name)}"
         selector_string = f'bytes internal constant {selector_name} =\n    hex"{abi_utils.method_id(function_name, param_types)[2:]}";'
@@ -45,20 +88,17 @@ def sol_error_selector(function_name, param_names, param_types):
     return (selector_name, selector_comment, selector_string)
 
 
-def indent(text):
-    lines = text.split("\n")
-    return "\n".join([f"    {line}" for line in lines])
+def sol_error(function_name, function_obj, selector_name):
+    param_names, param_types = params(
+        function_obj, convertEnums=False, bytesMemory=True
+    )
 
-
-def sol_error(function_name, param_names, param_types, selector_name):
-    param_types = [
-        type + " memory" if type == "bytes" else type for type in param_types
-    ]
     if len(param_names) == 0:
         function_header = f"function {function_name}()"
     else:
-        params = [" ".join(param) for param in zip(param_types, param_names)]
-        params_string = indent(",\n".join(params))
+        params_string = indent(
+            ",\n".join([" ".join(param) for param in zip(param_types, param_names)])
+        )
         function_header = f"function {function_name}(\n{params_string}\n)"
 
     modifiers = indent("internal\npure\nreturns (bytes memory)")
@@ -73,26 +113,26 @@ def sol_error(function_name, param_names, param_types, selector_name):
     return f"{function_header}\n{modifiers}\n{function_body}"
 
 
-def ts_type(sol_type):
-    if "int" in sol_type:
-        return "BigNumber | number | string"
-    else:
-        return "string"
-
-
 # We can be sloppy with the formatting here because prettier will fix it up for us
-def ts_error(function_name, param_names, param_types):
-    sol_params = [" ".join(param) for param in zip(param_types, param_names)]
-    sol_params_string = ", ".join(sol_params)
+def ts_error(function_name, function_obj, enums):
+    declaration_param_names, declaration_param_types = params(
+        function_obj, convertEnums=True
+    )
+    declaration_params = [
+        " ".join(param)
+        for param in zip(declaration_param_types, declaration_param_names)
+    ]
+    declaration_params_string = ", ".join(declaration_params)
 
+    param_names, param_types = params(function_obj)
     ts_params = [
-        f"{name}?: {ts_type(sol_type)}"
+        f"{name}?: {ts_type(sol_type, enums)}"
         for (name, sol_type) in zip(param_names, param_types)
     ]
     ts_params_string = ",".join(ts_params)
 
     name_string = f"'{function_name}'"
-    declaration_string = f"'{function_name}({sol_params_string})'"
+    declaration_string = f"'{function_name}({declaration_params_string})'"
     values_string = f'{{ {",".join(param_names)} }}'
 
     super_string = (
@@ -106,67 +146,59 @@ def ts_error(function_name, param_names, param_types):
     return class_string
 
 
-def sol_codegen(lib_name, functions, target):
+def sol_codegen(lib_name, contract, target):
+    error_code_enums = []
+    for enum_name, enum_obj in contract.enums.items():
+        error_codes = indent(",\n".join([c.name for c in enum_obj.members]))
+        enum_str = f"enum {enum_name} {{\n{error_codes}\n}}"
+        error_code_enums.append(enum_str)
+
     error_selectors = []
     error_functions = []
 
-    for function_name, function_obj in functions.items():
-        param_names = []
-        param_types = []
-        for param, props in function_obj.arguments.items():
-            param_names.append(param)
-            param_types.append(props.typeName.name)
-
+    for function_name, function_obj in contract.functions.items():
         selector_name, selector_comment, selector_string = sol_error_selector(
-            function_name, param_names, param_types
+            function_name, function_obj
         )
         error_selectors.append(f"{selector_comment}\n{selector_string}")
-        error_functions.append(
-            sol_error(function_name, param_names, param_types, selector_name)
-        )
+        error_functions.append(sol_error(function_name, function_obj, selector_name))
 
     shutil.copyfile("constants/sol_prefix.txt", target)
     with open(target, "a") as f:
         f.write(f"\n\nlibrary {lib_name} ")
         f.write("{\n")
+        f.write("\n\n".join([indent(e) for e in error_code_enums]))
+        f.write("\n\n")
         f.write("\n\n".join([indent(s) for s in error_selectors]))
         f.write(f'\n\n{indent("// solhint-disable func-name-mixedcase")}\n')
         f.write("\n\n".join([indent(f) for f in error_functions]))
         f.write("\n}\n")
 
 
-def ts_codegen(functions, repo, target):
+def ts_codegen(contract, repo, target):
+    error_code_enums = []
+    for enum_name, enum_obj in contract.enums.items():
+        error_codes = ",".join([upper_camel_casing(c.name) for c in enum_obj.members])
+        enum_str = f"export enum {enum_name} {{ {error_codes} }}"
+        error_code_enums.append(enum_str)
+
     error_classes = []
-
-    for function_name, function_obj in functions.items():
-        param_names = []
-        param_types = []
-        for param, props in function_obj.arguments.items():
-            param_names.append(param)
-            param_types.append(props.typeName.name)
-
-        selector_name, _, _ = sol_error_selector(
-            function_name, param_names, param_types
-        )
-        error_classes.append(ts_error(function_name, param_names, param_types))
+    for function_name, function_obj in contract.functions.items():
+        error_classes.append(ts_error(function_name, function_obj, contract.enums))
 
     shutil.copyfile("constants/ts_prefix.txt", target)
     with open(target, "a") as f:
         f.write("\n\n")
+        f.write("\n\n".join(error_code_enums))
+        f.write("\n\n")
         f.write("\n\n".join(error_classes))
-        f.write(f'\n\nconst types = [{",".join(functions.keys())}];\n')
+        f.write(f'\n\nconst types = [{",".join(contract.functions.keys())}];\n')
         with open("constants/ts_suffix.txt", "r") as file_suffix:
             for line in file_suffix:
                 f.write(line)
 
     cwd = os.getcwd()
     os.system(f"cd {repo} && yarn prettier && cd {cwd}")
-
-
-def get_ts_target(repo, lib_path):
-    m = re.match(r"Lib(\w+)RichErrors.sol", lib_path.split("/")[-1])
-    identifier = m.group(1).lower()
-    return f"{repo}/{ORDER_UTILS_DIR}/{identifier}_revert_errors.ts"
 
 
 arg_parser = argparse.ArgumentParser(
@@ -188,5 +220,5 @@ sourceUnitObject = parser.objectify(sourceUnit)
 contractName = list(sourceUnitObject.contracts.keys())[0]
 contractObject = sourceUnitObject.contracts[contractName]
 
-sol_codegen(contractName, contractObject.functions, sol_target)
-ts_codegen(contractObject.functions, args.repo, ts_target)
+sol_codegen(contractName, contractObject, sol_target)
+ts_codegen(contractObject, args.repo, ts_target)
