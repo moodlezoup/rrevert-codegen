@@ -198,7 +198,9 @@ def ts_codegen(contract, repo, target):
                 f.write(line)
 
     cwd = os.getcwd()
-    os.system(f"cd {repo} && yarn prettier && cd {cwd}")
+    os.system(
+        f"cd {repo} && node ./node_modules/.bin/prettier --write {target} --config .prettierrc && cd {cwd}"
+    )
 
 
 arg_parser = argparse.ArgumentParser(
